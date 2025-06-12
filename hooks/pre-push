@@ -1,0 +1,123 @@
+#!/bin/bash
+# pre-push hook for AI Agent Handoff System
+# Validates critical paths and documentation before pushing
+
+# Exit on error
+set -e
+
+# Colors for output
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+echo -e "${BLUE}Running pre-push validation...${NC}"
+
+# Check if critical files exist
+CRITICAL_FILES=("docs/HANDOFF.md" "docs/AGENT_GUIDELINES.md" "docs/CRITICAL_PATHS.md" "docs/dev_log.md")
+MISSING_FILES=()
+
+for file in "${CRITICAL_FILES[@]}"; do
+    if [ ! -f "$file" ]; then
+        MISSING_FILES+=("$file")
+    fi
+done
+
+if [ ${#MISSING_FILES[@]} -ne 0 ]; then
+    echo -e "${RED}Error: The following critical files are missing:${NC}"
+    for file in "${MISSING_FILES[@]}"; do
+        echo "  - $file"
+    done
+    echo -e "${YELLOW}Please create these files before pushing.${NC}"
+    exit 1
+fi
+
+# Check for dev log updates
+# Get list of commits to be pushed that aren't on the remote
+COMMITS_TO_PUSH=$(git log @{u}.. --pretty=format:"%h")
+
+if [ -n "$COMMITS_TO_PUSH" ]; then
+    # Check if all these commits have entries in the dev log
+    MISSING_ENTRIES=()
+    
+    for commit in $COMMITS_TO_PUSH; do
+        if ! grep -q "$commit" docs/dev_log.md; then
+            MISSING_ENTRIES+=("$commit")
+        fi
+    done
+    
+    if [ ${#MISSING_ENTRIES[@]} -ne 0 ]; then
+        echo -e "${RED}Error: The following commits are missing dev log entries:${NC}"
+        for commit in "${MISSING_ENTRIES[@]}"; do
+            echo "  - $commit: $(git log -1 --pretty=%B $commit | head -n 1)"
+        done
+        echo -e "${YELLOW}Please update docs/dev_log.md before pushing.${NC}"
+        exit 1
+    fi
+fi
+
+# Validate that critical paths file references actual files
+if [ -f "docs/CRITICAL_PATHS.md" ]; then
+    # Extract file paths from CRITICAL_PATHS.md
+    # This is a simplified version - in a real implementation, you'd want to parse
+    # the markdown more carefully to extract actual file paths
+    PATHS=$(grep -o '`[^`]*`' docs/CRITICAL_PATHS.md | tr -d '`' | grep '/' | sort | uniq)
+    
+    INVALID_PATHS=()
+    
+    for path in $PATHS; do
+        # Skip paths with placeholders
+        if [[ $path == *"["*"]"* ]]; then
+            continue
+        fi
+        
+        # Check if the path exists
+        if [ ! -e "$path" ] && [ ! -d "$path" ]; then
+            INVALID_PATHS+=("$path")
+        fi
+    done
+    
+    if [ ${#INVALID_PATHS[@]} -ne 0 ]; then
+        echo -e "${YELLOW}Warning: The following paths in CRITICAL_PATHS.md may be invalid:${NC}"
+        for path in "${INVALID_PATHS[@]}"; do
+            echo "  - $path"
+        done
+        echo -e "${BLUE}Please verify these paths before continuing.${NC}"
+        
+        # Ask for confirmation
+        read -p "Continue with push anyway? (y/N) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+fi
+
+# Check if environment validation script exists and run it
+if [ -f "scripts/validate_environment.sh" ]; then
+    echo -e "${BLUE}Running environment validation...${NC}"
+    if ! bash scripts/validate_environment.sh --pre-push; then
+        echo -e "${RED}Environment validation failed!${NC}"
+        echo -e "${YELLOW}Please fix the issues before pushing.${NC}"
+        exit 1
+    fi
+fi
+
+# Check if documentation is stale (older than 2 weeks)
+HANDOFF_AGE=$(( ( $(date +%s) - $(stat -c %Y docs/HANDOFF.md 2>/dev/null || stat -f %m docs/HANDOFF.md) ) / 86400 ))
+if [ $HANDOFF_AGE -gt 14 ]; then
+    echo -e "${YELLOW}Warning: HANDOFF.md is $HANDOFF_AGE days old.${NC}"
+    echo -e "${BLUE}Consider updating the documentation before pushing.${NC}"
+    
+    # Ask for confirmation
+    read -p "Continue with push anyway? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+fi
+
+# All checks passed
+echo -e "${GREEN}Pre-push validation successful!${NC}"
+exit 0
