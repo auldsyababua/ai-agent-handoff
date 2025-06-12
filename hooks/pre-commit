@@ -1,0 +1,84 @@
+#!/bin/sh
+# pre-commit hook for AI Agent Handoff System
+# Enforces compression rules and prevents common mistakes
+
+set -e
+
+# Colors (if terminal supports it)
+if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
+    GREEN=$(tput setaf 2)
+    RED=$(tput setaf 1)
+    YELLOW=$(tput setaf 3)
+    BLUE=$(tput setaf 4)
+    NC=$(tput sgr0)
+else
+    GREEN=""
+    RED=""
+    YELLOW=""
+    BLUE=""
+    NC=""
+fi
+
+# Check for debug files in root
+DEBUG_FILES=$(find . -maxdepth 1 -name "debug-*" -o -name "test-*" -o -name "temp-*" 2>/dev/null | grep -v node_modules || true)
+
+if [ ! -z "$DEBUG_FILES" ]; then
+    printf '%s\n' "${RED}❌ ERROR: Temporary files found in project root:${NC}"
+    echo "$DEBUG_FILES"
+    echo ""
+    echo "Move these to .scratch/ or delete them:"
+    echo "  mv debug-* .scratch/"
+    echo "  rm temp-*"
+    exit 1
+fi
+
+# Block uncompressed docs in docs/ (except symlinks)
+if [ -d "docs" ]; then
+    UNCOMPRESSED=$(find docs -maxdepth 1 -name "*.md" -type f 2>/dev/null | grep -v "_COMPACT\.md" || true)
+    if [ ! -z "$UNCOMPRESSED" ]; then
+        printf '%s\n' "${RED}❌ ERROR: Uncompressed files found in docs/:${NC}"
+        echo "$UNCOMPRESSED"
+        echo ""
+        echo "Only _COMPACT.md files should be actual files in docs/"
+        echo "Run: python3 scripts/compress_docs.py"
+        exit 1
+    fi
+fi
+
+# Block .human/ modifications by agents
+if git diff --cached --name-only | grep "^\.human/"; then
+    printf '%s\n' "${RED}❌ ERROR: Agents should never modify .human/ directory${NC}"
+    echo "These are auto-generated from _COMPACT.md files"
+    exit 1
+fi
+
+# Auto-run compression/decompression
+if [ -f "scripts/compress_docs.py" ] && command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "${BLUE}Running compression check...${NC}"
+    python3 scripts/compress_docs.py --silent || true
+fi
+
+if [ -f "scripts/decompress.py" ] && command -v python3 >/dev/null 2>&1; then
+    python3 scripts/decompress.py --silent || true
+fi
+
+# Check for common mistakes in commit
+STAGED_FILES=$(git diff --cached --name-only)
+
+# Check for credentials in staged files
+for file in $STAGED_FILES; do
+    if [ -f "$file" ]; then
+        # Skip binary files
+        if file "$file" | grep -q "text"; then
+            # Check for potential secrets
+            if grep -E "(api_key|apikey|api-key|secret|password|token|credential)" "$file" | grep -v "example\|template\|placeholder" >/dev/null 2>&1; then
+                printf '%s\n' "${YELLOW}⚠️  WARNING: Potential secrets found in $file${NC}"
+                printf '%s\n' "Please review before committing."
+                # Don't block, just warn
+            fi
+        fi
+    fi
+done
+
+printf '%s\n' "${GREEN}✅ Pre-commit checks passed${NC}"
+exit 0

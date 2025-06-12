@@ -21,6 +21,12 @@ git clone https://github.com/yourusername/ai-agent-handoff.git
 # Initialize in your project
 cd your-project-directory
 /path/to/ai-agent-handoff/setup.sh
+
+# First-time project setup (fill in project-specific context)
+python3 scripts/init_project_context.py
+
+# Add handy alias for starting Claude sessions (add to ~/.bashrc or ~/.zshrc)
+alias claude-handoff='echo "Read docs/HANDOFF.md" | pbcopy && echo "Instruction copied to clipboard!"'
 ```
 
 ## 🛠️ Core Features
@@ -44,6 +50,8 @@ cd your-project-directory
 ### Documents
 
 - `HANDOFF.md` - Master entry point for agents
+- `SESSION_CONTEXT.md` - Auto-generated current state snapshot
+- `CLAUDE.md` - Claude-specific instructions
 - `AGENT_GUIDELINES.md` - Development workflow rules
 - `CRITICAL_PATHS.md` - Architecture documentation
 - `dev_log.md` - Ongoing development narrative
@@ -53,10 +61,12 @@ cd your-project-directory
 - `compress_docs.py` - Document compression for context efficiency
 - `rotate_dev_log.py` - Prevent context overflow
 - `validate_environment.sh` - Ensure consistent setup
+- `update_session_context.sh` - Generate current state snapshot
+- `init_project_context.py` - Interactive project setup wizard
 
 ### Git Hooks
 
-- `post-commit` - Automate dev log updates
+- `post-commit` - Automate dev log updates, compress docs, update session context
 - `pre-push` - Validate critical paths
 
 ## 🔄 Workflow

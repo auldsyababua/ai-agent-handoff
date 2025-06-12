@@ -1,20 +1,34 @@
-#!/bin/bash
+#!/bin/sh
 # post-commit hook for AI Agent Handoff System
 # Automatically adds an entry to dev_log.md after each commit
 
 # Exit on error
 set -e
 
-# Colors for output
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+# Colors for output (only if terminal supports it)
+if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
+    GREEN=$(tput setaf 2)
+    BLUE=$(tput setaf 4)
+    YELLOW=$(tput setaf 3)
+    RED=$(tput setaf 1)
+    NC=$(tput sgr0)
+else
+    GREEN=''
+    BLUE=''
+    YELLOW=''
+    RED=''
+    NC=''
+fi
 
-# Configuration
-DEV_LOG_PATH="docs/dev_log.md"
+# Configuration - use human directory for dev log
+DEV_LOG_PATH=".human/docs/dev_log.md"
 EDITOR=${EDITOR:-nano}
+
+# Check for required commands
+if ! command -v awk >/dev/null 2>&1; then
+    printf '%s\n' "${RED}Error: awk is required but not found${NC}"
+    exit 1
+fi
 
 # Get the most recent commit hash (first 7 characters)
 COMMIT_HASH=$(git rev-parse --short HEAD)
@@ -26,11 +40,11 @@ COMMIT_MSG=$(git log -1 --pretty=%B)
 TIMESTAMP=$(date "+%Y-%m-%d %H:%M")
 
 # Create a template for the dev log entry
-TEMPLATE="### $TIMESTAMP - Commit: $COMMIT_HASH\n- What: \n- Why: \n- Issues: \n- Next: \n\n"
+TEMPLATE=$(printf '### %s - Commit: %s\n- What: \n- Why: \n- Issues: \n- Next: \n\n' "$TIMESTAMP" "$COMMIT_HASH")
 
 # Determine if dev_log.md exists
 if [ ! -f "$DEV_LOG_PATH" ]; then
-    echo -e "${YELLOW}Warning: $DEV_LOG_PATH does not exist. Creating it...${NC}"
+    printf '%s\n' "${YELLOW}Warning: $DEV_LOG_PATH does not exist. Creating it...${NC}"
     mkdir -p $(dirname "$DEV_LOG_PATH")
     echo "# Development Log" > "$DEV_LOG_PATH"
     echo "" >> "$DEV_LOG_PATH"
@@ -48,11 +62,11 @@ fi
 
 # Create a temporary file for the dev log entry
 TEMP_FILE=$(mktemp)
-echo -e "$TEMPLATE" > "$TEMP_FILE"
+printf '%s' "$TEMPLATE" > "$TEMP_FILE"
 
 # Prompt user to complete the entry
-echo -e "${BLUE}Please complete the dev log entry for commit $COMMIT_HASH${NC}"
-echo -e "${YELLOW}Commit message: ${NC}$COMMIT_MSG"
+printf '%s\n' "${BLUE}Please complete the dev log entry for commit $COMMIT_HASH${NC}"
+printf '%s\n' "${YELLOW}Commit message: ${NC}$COMMIT_MSG"
 echo ""
 
 # Determine how to handle the dev log entry
@@ -64,45 +78,69 @@ if [ -t 1 ]; then
     DEV_LOG_ENTRY=$(cat "$TEMP_FILE")
     
     # Insert at the beginning of the Development History section
-    awk -v entry="$DEV_LOG_ENTRY" '
+    # First check if the section exists
+    if ! grep -q "^## Development History" "$DEV_LOG_PATH"; then
+        # Section doesn't exist, append it
+        echo "" >> "$DEV_LOG_PATH"
+        echo "## Development History" >> "$DEV_LOG_PATH"
+        echo "" >> "$DEV_LOG_PATH"
+    fi
+    
+    # Create backup before modification
+    cp "$DEV_LOG_PATH" "${DEV_LOG_PATH}.bak"
+    
+    # Insert the entry
+    if awk -v entry="$DEV_LOG_ENTRY" '
     /^## Development History/ {
         print $0;
         print "";
         print entry;
         next;
     }
-    /^## Development History$/ {
-        print $0;
-        print "";
-        print entry;
-        next;
-    }
     { print $0 }
-    ' "$DEV_LOG_PATH" > "${DEV_LOG_PATH}.new"
-    
-    mv "${DEV_LOG_PATH}.new" "$DEV_LOG_PATH"
+    ' "$DEV_LOG_PATH" > "${DEV_LOG_PATH}.new"; then
+        mv "${DEV_LOG_PATH}.new" "$DEV_LOG_PATH"
+        rm -f "${DEV_LOG_PATH}.bak"
+    else
+        # Restore backup on failure
+        mv "${DEV_LOG_PATH}.bak" "$DEV_LOG_PATH"
+        printf '%s\n' "${RED}Error: Failed to update dev log${NC}"
+        exit 1
+    fi
 else
     # Non-interactive - append template with some automation
-    DEV_LOG_ENTRY="### $TIMESTAMP - Commit: $COMMIT_HASH\n- What: $COMMIT_MSG\n- Why: Automated commit log\n- Issues: None recorded\n- Next: Continue development\n\n"
+    DEV_LOG_ENTRY=$(printf '### %s - Commit: %s\n- What: %s\n- Why: Automated commit log\n- Issues: None recorded\n- Next: Continue development\n\n' "$TIMESTAMP" "$COMMIT_HASH" "$COMMIT_MSG")
     
     # Insert at the beginning of the Development History section
-    awk -v entry="$DEV_LOG_ENTRY" '
+    # First check if the section exists
+    if ! grep -q "^## Development History" "$DEV_LOG_PATH"; then
+        # Section doesn't exist, append it
+        echo "" >> "$DEV_LOG_PATH"
+        echo "## Development History" >> "$DEV_LOG_PATH"
+        echo "" >> "$DEV_LOG_PATH"
+    fi
+    
+    # Create backup before modification
+    cp "$DEV_LOG_PATH" "${DEV_LOG_PATH}.bak"
+    
+    # Insert the entry
+    if awk -v entry="$DEV_LOG_ENTRY" '
     /^## Development History/ {
         print $0;
         print "";
         print entry;
         next;
     }
-    /^## Development History$/ {
-        print $0;
-        print "";
-        print entry;
-        next;
-    }
     { print $0 }
-    ' "$DEV_LOG_PATH" > "${DEV_LOG_PATH}.new"
-    
-    mv "${DEV_LOG_PATH}.new" "$DEV_LOG_PATH"
+    ' "$DEV_LOG_PATH" > "${DEV_LOG_PATH}.new"; then
+        mv "${DEV_LOG_PATH}.new" "$DEV_LOG_PATH"
+        rm -f "${DEV_LOG_PATH}.bak"
+    else
+        # Restore backup on failure
+        mv "${DEV_LOG_PATH}.bak" "$DEV_LOG_PATH"
+        printf '%s\n' "${RED}Error: Failed to update dev log${NC}"
+        exit 1
+    fi
 fi
 
 # Clean up
@@ -110,27 +148,64 @@ rm -f "$TEMP_FILE"
 
 # Check if we need to commit the dev log update
 if git diff --quiet "$DEV_LOG_PATH"; then
-    echo -e "${YELLOW}No changes made to $DEV_LOG_PATH${NC}"
+    printf '%s\n' "${YELLOW}No changes made to $DEV_LOG_PATH${NC}"
 else
-    echo -e "${GREEN}Updated $DEV_LOG_PATH with new entry${NC}"
+    printf '%s\n' "${GREEN}Updated $DEV_LOG_PATH with new entry${NC}"
     
     # Check if we should auto-commit the dev log update
     if [ "${AUTO_COMMIT_DEV_LOG:-false}" = "true" ]; then
         git add "$DEV_LOG_PATH"
         git commit -m "docs: update dev log for commit $COMMIT_HASH" --no-verify
-        echo -e "${GREEN}Automatically committed dev log update${NC}"
+        printf '%s\n' "${GREEN}Automatically committed dev log update${NC}"
     else
-        echo -e "${BLUE}Remember to commit the dev log update:${NC}"
+        printf '%s\n' "${BLUE}Remember to commit the dev log update:${NC}"
         echo "  git add $DEV_LOG_PATH"
         echo "  git commit -m \"docs: update dev log for commit $COMMIT_HASH\" --no-verify"
+    fi
+fi
+
+# Auto-compress documentation after commit
+if [ -f scripts/compress_docs.py ] && command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "${BLUE}Compressing documentation...${NC}"
+    if python3 scripts/compress_docs.py --silent; then
+        printf '%s\n' "${GREEN}Documentation compressed successfully${NC}"
+    else
+        printf '%s\n' "${YELLOW}Warning: Documentation compression failed${NC}"
+    fi
+fi
+
+# Decompress for humans
+if [ -f scripts/decompress.py ] && command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "${BLUE}Decompressing for human readers...${NC}"
+    if python3 scripts/decompress.py --silent; then
+        printf '%s\n' "${GREEN}Human-readable versions updated${NC}"
+    else
+        printf '%s\n' "${YELLOW}Warning: Decompression failed${NC}"
+    fi
+fi
+
+# If any compressed files changed, amend the commit
+if git diff --name-only | grep -q "_COMPACT.md\|\.compressed/\|\.human/"; then
+    git add -A .compressed/*_COMPACT.md .human/ START_HERE_COMPACT.md 2>/dev/null || true
+    git commit --amend --no-edit --no-verify 2>/dev/null || true
+    printf '%s\n' "${GREEN}Amended commit with compressed files${NC}"
+fi
+
+# Update session context
+if [ -f scripts/update_session_context.sh ]; then
+    printf '%s\n' "${BLUE}Updating session context...${NC}"
+    if sh scripts/update_session_context.sh; then
+        printf '%s\n' "${GREEN}Session context updated${NC}"
+    else
+        printf '%s\n' "${YELLOW}Warning: Session context update failed${NC}"
     fi
 fi
 
 # Check if we need to do a documentation refresh (every 10 commits)
 COMMIT_COUNT=$(git rev-list --count HEAD)
 if [ $((COMMIT_COUNT % 10)) -eq 0 ]; then
-    echo -e "${YELLOW}This is commit #$COMMIT_COUNT - time for a documentation refresh!${NC}"
-    echo -e "${BLUE}Please verify that all documentation is up-to-date:${NC}"
+    printf '%s\n' "${YELLOW}This is commit #$COMMIT_COUNT - time for a documentation refresh!${NC}"
+    printf '%s\n' "${BLUE}Please verify that all documentation is up-to-date:${NC}"
     echo "1. Check that all file paths in docs are correct"
     echo "2. Update architecture diagrams if needed"
     echo "3. Verify environment setup instructions"

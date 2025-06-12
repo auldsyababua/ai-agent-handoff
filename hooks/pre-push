@@ -1,18 +1,26 @@
-#!/bin/bash
+#!/bin/sh
 # pre-push hook for AI Agent Handoff System
 # Validates critical paths and documentation before pushing
 
 # Exit on error
 set -e
 
-# Colors for output
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m' # No Color
+# Colors for output (only if terminal supports it)
+if [ -t 1 ] && command -v tput >/dev/null 2>&1; then
+    GREEN=$(tput setaf 2)
+    BLUE=$(tput setaf 4)
+    YELLOW=$(tput setaf 3)
+    RED=$(tput setaf 1)
+    NC=$(tput sgr0)
+else
+    GREEN=''
+    BLUE=''
+    YELLOW=''
+    RED=''
+    NC=''
+fi
 
-echo -e "${BLUE}Running pre-push validation...${NC}"
+printf '%s\n' "${BLUE}Running pre-push validation...${NC}"
 
 # Check if critical files exist
 CRITICAL_FILES=("docs/HANDOFF.md" "docs/AGENT_GUIDELINES.md" "docs/CRITICAL_PATHS.md" "docs/dev_log.md")
